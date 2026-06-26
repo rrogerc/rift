@@ -1335,8 +1335,33 @@ impl LayoutEngine {
                         );
                         return EventResponse::default();
                     }
+                    // Decide whether this focus event should move the layout selection.
+                    //
+                    // The window-discovery sync re-emits WindowFocused for the frontmost
+                    // app's *main* window after every batch. That re-assertion has two
+                    // jobs that pull in opposite directions:
+                    //   * When a *background* app adds windows, adding shifts the layout
+                    //     selection onto the new (background) window; the re-assertion
+                    //     must recover selection back to the focused window.
+                    //   * When the *focused* app itself opens a new window, dwindle wants
+                    //     that new window to stay selected so the next window splits it.
+                    //     The app's main window is often still an older window, so a blind
+                    //     re-select would reset selection to the old pane and the next
+                    //     window would split the wrong one (the BSP "splits the left pane"
+                    //     bug).
+                    //
+                    // Distinguish the two by app ownership: only skip re-selecting when
+                    // the focus is unchanged AND the current selection already belongs to
+                    // the same app (the focused app just opened a window -> keep it).
+                    let focus_changed = self.focused_window != Some(wid);
+                    let selection_same_app = self
+                        .workspace_tree(ws_id)
+                        .selected_window(layout)
+                        .is_some_and(|sel| sel.pid == wid.pid);
                     self.focused_window = Some(wid);
-                    let _ = self.workspace_tree_mut(ws_id).select_window(layout, wid);
+                    if focus_changed || !selection_same_app {
+                        let _ = self.workspace_tree_mut(ws_id).select_window(layout, wid);
+                    }
                     self.virtual_workspace_manager.set_last_focused_window(space, ws_id, Some(wid));
                 } else {
                     warn!(
